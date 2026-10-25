@@ -18,7 +18,7 @@ fn bsd_socket_failure(raw: i64) -> bool {
 }
 /// SDK-owned thread-local slot, captured on the same calling thread. Wrapper
 /// SERVICE/ARG statuses do not set BSD errno and must never consume stale data.
-pub(crate) fn socket_errno(raw: i64) -> i32 {
+pub fn socket_errno(raw: i64) -> i32 {
     if bsd_socket_failure(raw) {
         unsafe { zts_get_thread_socket_error() }
     } else {
@@ -30,7 +30,7 @@ pub(crate) fn socket_errno(raw: i64) -> i32 {
 /// SDK uses a 32-bit signed ssize_t; generated bindings may expose its EAX -1
 /// result as zero-extended 4294967295. None means a negative SDK status, never
 /// EOF. Some(0) keeps ordinary stream EOF / empty-datagram semantics.
-pub(crate) fn checked_io_count(raw: i64, capacity: usize) -> std::io::Result<Option<usize>> {
+pub fn checked_io_count(raw: i64, capacity: usize) -> std::io::Result<Option<usize>> {
     checked_io_count_abi(raw, capacity, cfg!(windows))
 }
 fn checked_io_count_abi(
@@ -392,6 +392,10 @@ impl ZtSocket {
     pub fn listen(ip: &str, port: u16) -> Result<Arc<Self>, String> {
         Self::listen_configured(ip, port, false)
     }
+    /// Rebind a fully closed TCP endpoint; never enables concurrent live listeners.
+    pub fn listen_reusable_tcp(ip: &str, port: u16) -> Result<Arc<Self>, String> {
+        Self::listen_configured(ip, port, true)
+    }
     fn listen_configured(ip: &str, port: u16, reuse: bool) -> Result<Arc<Self>, String> {
         let s = Self::new()?;
         if reuse {
@@ -535,7 +539,7 @@ impl ZtSocket {
         self.stopped.store(true, Ordering::SeqCst);
     }
 }
-pub(crate) fn retryable(e: i32) -> bool {
+pub fn retryable(e: i32) -> bool {
     // lwIP's Win32 arch/cc.h uses MSVC errno from VS 2017 onward.
     // Its EWOULDBLOCK (140) differs from the SDK's POSIX enum (11).
     // Unix lwIP still uses the SDK values, including on macOS.

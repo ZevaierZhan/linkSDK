@@ -1,5 +1,5 @@
 use crate::{
-    platform::{identity_id, private_dir, write_private},
+    platform::{identity_id, write_private},
     runtime::Sdk,
     SpaceConfig,
 };
@@ -81,37 +81,7 @@ pub fn prepare_identity(home: &Path) -> Result<String, String> {
     identity_id(&public)
 }
 fn identity(home: &Path) -> Result<(String, String), String> {
-    let home = home.join("space");
-    private_dir(&home)?;
-    let public = home.join("identity.public");
-    let secret = home.join("identity.secret");
-    if public.exists() || secret.exists() {
-        let p =
-            std::fs::read_to_string(&public).map_err(|_| "incomplete identity; restore profile")?;
-        let s =
-            std::fs::read_to_string(&secret).map_err(|_| "incomplete identity; restore profile")?;
-        if identity_id(p.trim())? != identity_id(s.trim())? {
-            return Err("identity pair mismatch".into());
-        }
-        return Ok((p.trim().into(), s.trim().into()));
-    }
-    let (mut p, mut s) = (vec![0 as c_char; 512], vec![0 as c_char; 512]);
-    let (mut pl, mut sl) = (512, 512);
-    unsafe {
-        check(
-            libzt::zts_util_generate_identity(p.as_mut_ptr(), &mut pl, s.as_mut_ptr(), &mut sl),
-            "generate identity",
-        )?;
-    }
-    let p = unsafe { CStr::from_ptr(p.as_ptr()) }
-        .to_string_lossy()
-        .into_owned();
-    let s = unsafe { CStr::from_ptr(s.as_ptr()) }
-        .to_string_lossy()
-        .into_owned();
-    write_private(&secret, s.as_bytes())?;
-    write_private(&public, p.as_bytes())?;
-    Ok((p, s))
+    super::host::load_or_create_identity(&home.join("space"))
 }
 
 impl Node {
@@ -136,46 +106,11 @@ impl Node {
             )
             .map_err(|e| e.to_string())?
         } else {
-            let public = CString::new(public).map_err(|e| e.to_string())?;
-            let endpoint = CString::new(format!("{address}/{port}")).map_err(|e| e.to_string())?;
-            let mut roots: libzt::zts_root_set_t = unsafe { std::mem::zeroed() };
-            roots.public_id_str[0] = public.as_ptr() as *mut _;
-            roots.endpoint_ip_str[0][0] = endpoint.as_ptr() as *mut _;
-            let mut bytes = vec![0 as c_char; 4 * 1024 * 1024];
-            let mut len = bytes.len() as u32;
-            let mut key = vec![0 as c_char; 128];
-            let mut key_len = key.len() as u32;
-            let mut random = [0u8; 8];
-            getrandom::fill(&mut random).map_err(|e| e.to_string())?;
-            unsafe {
-                check(
-                    libzt::zts_util_sign_root_set_fresh(
-                        bytes.as_mut_ptr(),
-                        &mut len,
-                        key.as_mut_ptr(),
-                        &mut key_len,
-                        u64::from_ne_bytes(random).max(1),
-                        crate::now_millis(),
-                        &mut roots,
-                    ),
-                    "sign private planet",
-                )?;
-            }
-            write_private(
-                &dir.join("planet-signing.key"),
-                &key[..key_len as usize]
-                    .iter()
-                    .map(|v| *v as u8)
-                    .collect::<Vec<_>>(),
-            )?;
+            let signed = super::host::sign_planet(&public, address, port)?;
+            write_private(&dir.join("planet-signing.key"), &signed.signing_key)?;
             Bootstrap {
                 network_id: 0,
-                planet: B64.encode(
-                    bytes[..len as usize]
-                        .iter()
-                        .map(|v| *v as u8)
-                        .collect::<Vec<_>>(),
-                ),
+                planet: B64.encode(signed.planet),
                 root_id: id.clone(),
             }
         };
@@ -232,11 +167,9 @@ impl Node {
         }
         let planet = B64.decode(&bootstrap.planet).map_err(|e| e.to_string())?;
         let dir = sdk.home().join("space");
-        let home = CString::new(dir.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
-        let secret = CString::new(secret).map_err(|e| e.to_string())?;
         let mut node = Self {
             _sdk: sdk,
-            id: identity_id(secret.to_str().map_err(|e| e.to_string())?)?,
+            id: identity_id(secret)?,
             ip: String::new(),
             network_id: bootstrap.network_id,
             peers: Arc::new(Mutex::new(HashMap::new())),
@@ -244,34 +177,7 @@ impl Node {
             running: true,
             root,
         };
-        unsafe {
-            check(
-                libzt::zts_init_set_event_handler(Some(event)),
-                "set callback",
-            )?;
-            check(
-                libzt::zts_init_from_storage(home.as_ptr()),
-                "initialize storage",
-            )?;
-            check(
-                libzt::zts_init_from_memory(secret.as_ptr(), secret.as_bytes().len() as u32),
-                "load identity",
-            )?;
-            check(
-                libzt::zts_init_set_roots(planet.as_ptr() as _, planet.len() as u32),
-                "load private roots",
-            )?;
-            check(libzt::zts_init_set_port(port), "set UDP port")?;
-            if root {
-                check(libzt::zts_init_allow_secondary_port(0), "fixed root port")?;
-                check(
-                    libzt::zts_init_allow_port_mapping(0),
-                    "disable random root port",
-                )?;
-                check(libzt::zts_init_enable_controller(1), "enable controller")?;
-            }
-            check(libzt::zts_node_start(), "start node")?;
-        }
+        super::host::start(&dir, secret, &planet, port, root, Some(event))?;
         wait(
             || unsafe { libzt::zts_node_is_online() != 0 },
             "node online",

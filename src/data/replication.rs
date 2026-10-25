@@ -151,9 +151,34 @@ fn exchange(
     incoming_ip: Option<&str>,
     target: Option<&str>,
 ) -> Result<(), String> {
-    let home = &context.home;
+    exchange_with(
+        &context.home,
+        &context.id,
+        socket,
+        incoming_ip,
+        target,
+        |peer| {
+            context
+                .peers
+                .lock()
+                .get(peer)
+                .cloned()
+                .ok_or("source is not trusted".into())
+        },
+    )
+}
+/// Reuses an existing host's identity, transport and dynamic member authority.
+/// authorize is evaluated before outbound generation and for every received envelope;
+/// it must return the currently trusted virtual IP and may register revocation cancellation.
+pub fn exchange_with(
+    home: &std::path::Path,
+    id: &str,
+    socket: &Arc<ZtSocket>,
+    incoming_ip: Option<&str>,
+    target: Option<&str>,
+    authorize: impl Fn(&str) -> Result<String, String>,
+) -> Result<(), String> {
     let (mut store, n) = Store::open(home)?;
-    let id = context.id.clone();
     let mut states = States::new();
     let mut metrics = Metrics {
         peer: target.unwrap_or_default().into(),
@@ -163,15 +188,13 @@ fn exchange(
     let result = (|| -> Result<(), String> {
         let mut sent_quiet = false;
         if incoming_ip.is_none() {
-            if !context.peers.lock().contains_key(&metrics.peer) {
-                return Err("节点已移出空间".into());
-            }
+            authorize(&metrics.peer)?;
             let replicas =
                 store.sync_step(n, &metrics.peer.clone(), &mut states, vec![], &mut metrics)?;
             let packet = Packet {
                 version: PROTOCOL_VERSION,
                 network: n,
-                source: id.clone(),
+                source: id.to_owned(),
                 replicas,
             };
             sent_quiet = packet.quiet();
@@ -184,12 +207,10 @@ fn exchange(
             let remote = receive(socket, end, &mut metrics)?;
             metrics.rounds += 1;
             validate_packet(&remote, n, &id, target, &metrics.peer)?;
-            let peers = context.peers.lock();
-            let ip = peers.get(&remote.source).ok_or("source is not trusted")?;
+            let ip = authorize(&remote.source)?;
             if incoming_ip.is_some_and(|source| source != ip) {
                 return Err("source address mismatch".into());
             }
-            drop(peers);
             let remote_quiet = remote.quiet();
             metrics.peer = remote.source;
             if incoming_ip.is_none() && sent_quiet && remote_quiet {
@@ -205,7 +226,7 @@ fn exchange(
             let packet = Packet {
                 version: PROTOCOL_VERSION,
                 network: n,
-                source: id.clone(),
+                source: id.to_owned(),
                 replicas,
             };
             sent_quiet = packet.quiet();

@@ -51,3 +51,9 @@ impl Dataset {
         self.call("status", None, None)
     }
 }
+
+/// Adapter for a host that already owns profile lifecycle and permits serialized CLI writers.
+/// Keeps the original space/shared-data.sqlite layout; does not take a second profile lock.
+pub fn action_at(home: impl AsRef<std::path::Path>, request: Value) -> Result<Value, String> {
+    store::action(home.as_ref().to_path_buf(), request)
+}

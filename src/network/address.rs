@@ -1,6 +1,6 @@
 //! The public SDK IPv4 field is renamed by Windows headers during bindgen.
 use std::net::Ipv4Addr;
-pub(crate) fn encode(ip: Ipv4Addr) -> libzt::zts_in_addr {
+pub fn encode(ip: Ipv4Addr) -> libzt::zts_in_addr {
     let value = u32::from_ne_bytes(ip.octets());
     #[cfg(windows)]
     {
@@ -11,7 +11,7 @@ pub(crate) fn encode(ip: Ipv4Addr) -> libzt::zts_in_addr {
         libzt::zts_in_addr { s_addr: value }
     }
 }
-pub(crate) fn decode(address: &libzt::zts_in_addr) -> Ipv4Addr {
+pub fn decode(address: &libzt::zts_in_addr) -> Ipv4Addr {
     #[cfg(windows)]
     let value = address.S_addr;
     #[cfg(not(windows))]

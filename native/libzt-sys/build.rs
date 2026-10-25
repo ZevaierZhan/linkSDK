@@ -1,6 +1,9 @@
 use std::{env, path::PathBuf};
 fn main() {
-    let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
+    let root = env::var_os("LINKSDK_NATIVE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../.."));
+    println!("cargo:rerun-if-env-changed=LINKSDK_NATIVE_ROOT");
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let target = env::var("TARGET").unwrap();
     let dir = env::var_os("LINKSDK_LIBZT_LIB_DIR")
