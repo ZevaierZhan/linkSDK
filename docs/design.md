@@ -46,7 +46,7 @@ This initial public transport surface is TCP. libzt retains UDP support internal
 
 `native/dependencies.json` pins source revisions and source hashes. `scripts/prepare-libzt.mjs` retrieves upstream and submodules, applies checked patches, and builds a native static library. Generated sources/builds stay in ignored `vendor/`. The SDK's tracked internal FFI crate makes data-only Cargo resolution independent of that generated directory. Node.js is currently a build-preparation dependency, not a runtime dependency.
 
-The initial implementation copied a local source cache to avoid a temporary network outage, then built the native archive from source in the new repository. It did not copy the old application's archive into the SDK. A separate fresh-source preparation/clone validation is required before claiming complete clean-checkout reproducibility. Android cross-target binding code is included but unverified; complete Android native preparation and iOS SDK/signing/packaging are not delivered here. Do not reuse a host archive for another target; an explicit `LINKSDK_LIBZT_LIB_DIR` can identify a separately prepared target archive.
+The initial implementation copied a local source cache to avoid a temporary network outage, then built the native archive from source in the new repository. It did not copy the old application's archive into the SDK. A subsequent GitHub fresh clone downloaded pinned upstream sources and submodules, applied the patches, and rebuilt successfully without the old workspace. Android cross-target binding code is included but unverified; complete Android native preparation and iOS SDK/signing/packaging are not delivered here. Do not reuse a host archive for another target; an explicit `LINKSDK_LIBZT_LIB_DIR` can identify a separately prepared target archive.
 
 ## Examples and acceptance
 
@@ -71,4 +71,19 @@ Verified locally on macOS ARM64, rustc/cargo 1.99.0:
 - `shared-kv` passed all six acceptance checks, including offline write, concurrent version retention, reconnect convergence, conflict resolution and offline reopen after full shutdown (`artifacts/shared-kv-1792928333172-52840/report.json`).
 - Formatting check passed. Negative runs remain in ignored artifacts; identities and keys are not committed.
 
-Next: commit/push, verify a fresh clone can prepare and execute without the original workspace, then separately migrate B5533 to an immutable SDK commit. No B5533 consumer migration, multi-language bindings or independent daemon has been completed.
+## Fresh GitHub checkout verification, 2026-10-25
+
+Initial code commit `202225045c8939da072c20f38be7d6faff7e5cf0` was pushed to private `ZevaierZhan/linkSDK/main`; repository privacy was read back as true. A fresh GitHub clone under `artifacts/fresh-clone` independently fetched libzt and its submodules plus the pinned JSON header, checked revisions/input hashes, applied patches to pristine sources, and compiled its own archive (`artifacts/fresh-native-build.log`). The preparation script was also rerun idempotently in the primary checkout.
+
+In that fresh clone:
+
+- `cargo test --locked --offline --no-default-features --features data --test public_contract`: 3 passed (`artifacts/fresh-data-only.log`).
+- `cargo run --locked --offline --example p2p-echo`: passed, real two-process TCP in a new private space (`artifacts/fresh-clone/artifacts/p2p-echo-1792928769555-69716/report.json`).
+- `cargo run --locked --offline --example shared-kv`: all six checks passed, including offline concurrent modification, restart and resolution persistence (`artifacts/fresh-clone/artifacts/shared-kv-1792928787031-70688/report.json`). Reconnection needed two transient connect-deadline retries within the bounded repair window; this is observed recovery, not zero-delay availability.
+- Network-only `p2p-echo` compilation passed in the primary checkout (`artifacts/network-only-final.log`).
+
+GitHub Actions run `40190038086` did not start the data runner: the check annotation states that recent account payments failed or the spending limit needs to be increased. There were no executed CI steps. The other annotation concerns the Ubuntu runner-image migration and is not the cause. Remote CI is therefore unverified, not a passing check or a code-test failure. Local test claims above remain limited to macOS ARM64.
+
+User verification: clone the private repository, install prerequisites, run `node scripts/prepare-libzt.mjs`, then run both example commands from README. Each should end with a JSON report whose `result` is `passed`; shared-kv must include concurrent version retention and offline reopen checks. Supply `LINKSDK_TEST_ROOT_IP` if default interface selection is inappropriate. Profiles/reports are retained; do not upload their identity or Planet-signing key files.
+
+Next: separately migrate B5533 to an immutable SDK commit and verify original format/protocol interoperability; add typed errors, richer lifecycle/status and automatic repair scheduling only as needed; then implement/test a public UDP surface, mobile build preparation and additional platform acceptance. No B5533 consumer migration, multi-language bindings, independent daemon, cross-device NAT or long-running reliability acceptance has been completed.
