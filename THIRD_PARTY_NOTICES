@@ -1,0 +1,12 @@
+linkSDK is currently a private source repository. This file does not grant a new license to original SDK code or replace any dependency license.
+
+Extracted code and native compatibility scripts originate from ZevaierZhan/link-personal-assets. Preserve provenance when redistributing.
+
+Native dependencies are pinned in native/dependencies.json:
+- ZeroTier libzt: https://github.com/zerotier/libzt (LICENSE.txt)
+- ZeroTierOne: libzt ext/ZeroTierOne (COPYING)
+- lwIP: libzt ext/lwip (COPYING)
+- lwip-contrib: libzt ext/lwip-contrib (upstream notices)
+- nlohmann/json: https://github.com/nlohmann/json (MIT; copyright Niels Lohmann)
+
+Cargo.lock records Rust dependency versions. Automerge, rusqlite/SQLite, bindgen and all transitive dependencies retain their own upstream licenses and notices. Source preparation preserves native upstream license files in vendor/. Verify exact dependency terms before public redistribution; the repository is not published to crates.io.

@@ -1,0 +1,26 @@
+{
+  "libzt": {
+    "repository": "https://github.com/zerotier/libzt.git",
+    "revision": "a707ea6ae0910efdc1125d04758c411e2e9ea4f9",
+    "submodules": {
+      "ext/ZeroTierOne": "c53c6bd9c320ea839c525972d8afba448a58606e",
+      "ext/lwip": "32708c0a8b140efb545cc35101ee5fdeca6d6489",
+      "ext/lwip-contrib": "4fd612c9c72dfcd1db6618bd59c1a17d9f5b55f8"
+    }
+  },
+  "nlohmann-json": {
+    "repository": "https://github.com/nlohmann/json.git",
+    "tag": "v3.11.3",
+    "headerSha256": "9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6"
+  },
+  "patchInputs": {
+    "scripts/patch-libzt.mjs": "bfc31e555d6804fb0b337a546e4572f9cb241d639438843c2aaea61c84806646",
+    "scripts/diagnostics/actual-socket-stun.hpp": "4114d193dba0333247c5d3b5f6803945be86f49c763865686eeb7bc61582346c",
+    "scripts/libzt-android-build.rs": "5e4dd0f3f0421e27cd7110fb4939b2955c076832a6a7ecfc313bbdaf266dfd43"
+  },
+  "extractedFrom": {
+    "repository": "https://github.com/ZevaierZhan/link-personal-assets",
+    "baseCommit": "3cf6ac01f5ae8947bbf01d96905e4cf7e4c3a278",
+    "workingTreeChanges": true
+  }
+}

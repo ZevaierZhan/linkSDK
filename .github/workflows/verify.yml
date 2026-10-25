@@ -1,0 +1,34 @@
+name: Verify linkSDK
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      native:
+        description: Run macOS native build and isolated two-process examples
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked --no-default-features --features data
+  native:
+    if: github.event_name == 'workflow_dispatch' && inputs.native
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/prepare-libzt.mjs
+      - run: cargo test --locked
+      - run: cargo run --locked --example p2p-echo
+      - run: cargo run --locked --example shared-kv

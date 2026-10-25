@@ -1,0 +1,4 @@
+/target/
+/vendor/
+/artifacts/
+.DS_Store
