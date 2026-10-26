@@ -1,5 +1,9 @@
 # linkSDK design and implementation record
 
+## Windows v0.2.0 consumer build correction, 2026-10-26
+
+B5533's Windows consumer build of tag v0.2.0 failed with E0384 in `network/socket.rs`: the Windows EINPROGRESS compatibility branch assigned to immutable `pending`. Shadow the computed Boolean under `cfg(windows)` instead; both SDK and platform EINPROGRESS predicates remain unchanged. This is a source compatibility correction on top of v0.2.0, not a new release or proxy-runtime fix. Windows compilation plus the six `network::socket::` pure errno/count/retry tests pass using the consumer's freshly prepared v0.2.0 native archive. No Node, household profile, route, DNS or helper was started. Data-only verification: 16 unit tests pass; contention integration suite is 14 pass / 1 fail / 1 subprocess fixture ignored, repeated with test-threads=1 with the same result. `simultaneous_apps_serialize_writes_but_readers_remain_independent` exceeds its per-operation 2-second deadline on this Windows host; retain this as an unverified performance/availability limit, not a storage-success claim. Network examples and cross-platform runtime checks were not run on the daily proxy machine; v0.2.0 handoff's isolation boundary remains in force.
+
 ## Scope
 
 One public Rust crate, `link-sdk` (`link_sdk` in code). `native/libzt-sys` is an internal raw-binding/build dependency. Minimum core: OS support, P2P networking and shared data. `runtime` composes them. Application-specific PTY, process execution, TUN, media and UI remain outside this repository.

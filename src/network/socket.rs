@@ -337,9 +337,7 @@ impl ZtSocket {
             let pending =
                 bsd_socket_failure(rc as i64) && e == libzt::zts_errno_t_ZTS_EINPROGRESS as i32;
             #[cfg(windows)]
-            {
-                pending |= bsd_socket_failure(rc as i64) && e == libc::EINPROGRESS;
-            }
+            let pending = pending || (bsd_socket_failure(rc as i64) && e == libc::EINPROGRESS);
             if !pending {
                 return Err(error("connect", rc as _));
             }
