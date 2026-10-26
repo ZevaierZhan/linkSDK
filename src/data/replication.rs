@@ -110,19 +110,54 @@ pub fn sync_once(node: &Node, peer: &str, port: u16) -> Result<(), String> {
     socket.close();
     result
 }
-fn send(socket: &ZtSocket, p: &Packet, metrics: &mut Metrics) -> Result<(), String> {
+/// Ordered application-owned frames; implement with OS TCP or the SDK stream.
+pub trait FrameChannel {
+    fn send_frame(&self, frame: Frame) -> Result<(), String>;
+    fn receive_frame(&self, deadline: Instant) -> Result<Frame, String>;
+}
+impl FrameChannel for ZtSocket {
+    fn send_frame(&self, frame: Frame) -> Result<(), String> {
+        self.send(frame)
+    }
+    fn receive_frame(&self, deadline: Instant) -> Result<Frame, String> {
+        self.receive(Some(deadline))
+    }
+}
+/// The host serializes bounded local commits with generation retirement.
+/// No socket I/O may run while its commit gate is held.
+pub trait ReplicationGuard {
+    fn current(&self) -> Result<(), String>;
+    fn commit<T>(&self, transaction: impl FnOnce() -> Result<T, String>) -> Result<T, String>;
+}
+struct Unscoped;
+impl ReplicationGuard for Unscoped {
+    fn current(&self) -> Result<(), String> {
+        Ok(())
+    }
+    fn commit<T>(&self, transaction: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        transaction()
+    }
+}
+fn send(
+    socket: &impl FrameChannel,
+    p: &Packet,
+    metrics: &mut Metrics,
+    guard: &impl ReplicationGuard,
+) -> Result<(), String> {
     let bytes = serde_json::to_vec(p).map_err(err)?;
     // Base64-wrapped library sync messages use bounded ordered frames.
     if bytes.len() > HARD_MAX * 5 {
         return Err("交换报文超过限额".into());
     }
     for chunk in bytes.chunks(60000) {
-        socket.send(Frame {
+        guard.current()?;
+        socket.send_frame(Frame {
             kind: 1,
             data: chunk.to_vec(),
         })?;
     }
-    socket.send(Frame {
+    guard.current()?;
+    socket.send_frame(Frame {
         kind: 2,
         data: vec![],
     })?;
@@ -130,10 +165,17 @@ fn send(socket: &ZtSocket, p: &Packet, metrics: &mut Metrics) -> Result<(), Stri
     metrics.change_sent += p.replicas.iter().map(|r| r.change_bytes).sum::<u64>();
     Ok(())
 }
-fn receive(socket: &ZtSocket, end: Instant, metrics: &mut Metrics) -> Result<Packet, String> {
+fn receive(
+    socket: &impl FrameChannel,
+    end: Instant,
+    metrics: &mut Metrics,
+    guard: &impl ReplicationGuard,
+) -> Result<Packet, String> {
     let mut bytes = Vec::new();
     loop {
-        let f = socket.receive(Some(end))?;
+        guard.current()?;
+        let f = socket.receive_frame(end)?;
+        guard.current()?;
         if f.kind == 2 && f.data.is_empty() {
             break;
         }
@@ -178,7 +220,28 @@ pub fn exchange_with(
     target: Option<&str>,
     authorize: impl Fn(&str) -> Result<String, String>,
 ) -> Result<(), String> {
-    let (mut store, n) = Store::open(home)?;
+    exchange_channel_with(
+        home,
+        id,
+        socket.as_ref(),
+        incoming_ip,
+        target,
+        authorize,
+        &Unscoped,
+    )
+}
+/// Same wire v2 and durable store, with a host-selected channel and generation gate.
+pub fn exchange_channel_with(
+    home: &std::path::Path,
+    id: &str,
+    socket: &impl FrameChannel,
+    incoming_ip: Option<&str>,
+    target: Option<&str>,
+    authorize: impl Fn(&str) -> Result<String, String>,
+    guard: &impl ReplicationGuard,
+) -> Result<(), String> {
+    guard.current()?;
+    let (mut store, n) = guard.commit(|| Store::open(home))?;
     let mut states = States::new();
     let mut metrics = Metrics {
         peer: target.unwrap_or_default().into(),
@@ -189,8 +252,9 @@ pub fn exchange_with(
         let mut sent_quiet = false;
         if incoming_ip.is_none() {
             authorize(&metrics.peer)?;
-            let replicas =
-                store.sync_step(n, &metrics.peer.clone(), &mut states, vec![], &mut metrics)?;
+            let replicas = guard.commit(|| {
+                store.sync_step(n, &metrics.peer.clone(), &mut states, vec![], &mut metrics)
+            })?;
             let packet = Packet {
                 version: PROTOCOL_VERSION,
                 network: n,
@@ -198,13 +262,13 @@ pub fn exchange_with(
                 replicas,
             };
             sent_quiet = packet.quiet();
-            send(socket, &packet, &mut metrics)?;
+            send(socket, &packet, &mut metrics, guard)?;
         }
         for _ in 0..64 {
             if Instant::now() > end {
                 return Err("增量同步会话超时".into());
             }
-            let remote = receive(socket, end, &mut metrics)?;
+            let remote = receive(socket, end, &mut metrics, guard)?;
             metrics.rounds += 1;
             validate_packet(&remote, n, &id, target, &metrics.peer)?;
             let ip = authorize(&remote.source)?;
@@ -216,13 +280,15 @@ pub fn exchange_with(
             if incoming_ip.is_none() && sent_quiet && remote_quiet {
                 return Ok(());
             }
-            let replicas = store.sync_step(
-                n,
-                &metrics.peer.clone(),
-                &mut states,
-                remote.replicas,
-                &mut metrics,
-            )?;
+            let replicas = guard.commit(|| {
+                store.sync_step(
+                    n,
+                    &metrics.peer.clone(),
+                    &mut states,
+                    remote.replicas,
+                    &mut metrics,
+                )
+            })?;
             let packet = Packet {
                 version: PROTOCOL_VERSION,
                 network: n,
@@ -231,16 +297,105 @@ pub fn exchange_with(
             };
             sent_quiet = packet.quiet();
             // Only generate/respond after the received data and safe sync state commit.
-            send(socket, &packet, &mut metrics)?;
+            send(socket, &packet, &mut metrics, guard)?;
             if incoming_ip.is_some() && sent_quiet && remote_quiet {
                 return Ok(());
             }
         }
         Err("增量同步超过64轮".into())
     })();
+    guard.commit(|| {
     store.record(&metrics, &result)?;
     if result.is_ok() {
         store.db.execute("INSERT INTO shared_meta VALUES('last_exchange_ms',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[crate::now_millis().to_string()]).map_err(err)?;
     }
+    Ok(())
+    })?;
     result
+}
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+    struct Guard(AtomicBool);
+    impl ReplicationGuard for Guard {
+        fn current(&self) -> Result<(), String> {
+            if self.0.load(Ordering::SeqCst) {
+                Err("retired".into())
+            } else {
+                Ok(())
+            }
+        }
+        fn commit<T>(&self, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+            self.current()?;
+            f()
+        }
+    }
+    struct RetiringChannel<'a>(&'a Guard);
+    impl FrameChannel for RetiringChannel<'_> {
+        fn send_frame(&self, _: Frame) -> Result<(), String> {
+            panic!("retired input must not produce a response")
+        }
+        fn receive_frame(&self, _: Instant) -> Result<Frame, String> {
+            self.0 .0.store(true, Ordering::SeqCst);
+            Ok(Frame {
+                kind: 2,
+                data: vec![],
+            })
+        }
+    }
+    fn home() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "sdk-generation-{}-{}",
+            std::process::id(),
+            crate::now_millis()
+        ))
+    }
+    #[test]
+    fn retired_generation_never_opens_the_profile() {
+        let home = home();
+        let guard = Guard(AtomicBool::new(true));
+        assert!(exchange_channel_with(
+            &home,
+            "aaaaaaaaaa",
+            &RetiringChannel(&guard),
+            Some("10.0.0.2"),
+            None,
+            |_| Ok("10.0.0.2".into()),
+            &guard
+        )
+        .is_err());
+        assert!(!home.exists());
+    }
+    #[test]
+    fn retirement_during_receive_cannot_apply_changes_or_record_success() {
+        let home = home();
+        std::fs::create_dir_all(home.join("space")).unwrap();
+        std::fs::write(
+            home.join("space/space.json"),
+            br#"{"network_id":42,"planet_id":42,"space_mode":"assets"}"#,
+        )
+        .unwrap();
+        let guard = Guard(AtomicBool::new(false));
+        assert!(exchange_channel_with(
+            &home,
+            "aaaaaaaaaa",
+            &RetiringChannel(&guard),
+            Some("10.0.0.2"),
+            None,
+            |_| Ok("10.0.0.2".into()),
+            &guard
+        )
+        .is_err());
+        let (store, _) = Store::open(&home).unwrap();
+        for table in ["shared_docs", "shared_sync_metrics"] {
+            let n: i64 = store
+                .db
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 0);
+        }
+        drop(store);
+        std::fs::remove_dir_all(home).unwrap();
+    }
 }

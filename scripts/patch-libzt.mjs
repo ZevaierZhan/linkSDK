@@ -1,3 +1,4 @@
+import {patchLibztPacketAdapter} from './patch-libzt-packet-adapter.mjs';
 import {readFileSync as readSource, writeFileSync, existsSync} from 'node:fs';
 import {join} from 'node:path';
 // Git for Windows may check sources out as CRLF; patch anchors are LF.
@@ -65,6 +66,7 @@ extern void zts_record_socket_error(int error);
   }
   // Publish the callback loop's running flag before a newly scheduled child can
   // inspect it. Otherwise the child exits immediately and ready events are lost.
+  if (!readFileSync(join(vend,'src/Controls.cpp'),'utf8').includes('LINK_EXTERNAL_CALLBACK_LIFETIME')) {
   modifyNative('src/Controls.cpp', [[
     `    if (zts_events->hasCallback()) {
 #if defined(__WINDOWS__)
@@ -100,6 +102,7 @@ extern void zts_record_socket_error(int error);
         }
     }`,
   ]]);
+  }
   // Local opt-in diagnostics reuse the existing validated UDP descriptor.
   writeFileSync(join(vend, 'src', 'LinkSocketStun.hpp'), readFileSync(new URL('./diagnostics/actual-socket-stun.hpp', import.meta.url), 'utf8'));
   modifyNative('src/NodeService.cpp', [
@@ -150,6 +153,7 @@ int zts_node_stop()`,
     if (!existsSync(p)) throw new Error(`Missing SDK source: ${p}`);
     let body=readFileSync(p,'utf8'); let changed=false;
     for (const [oldText,newText] of replacements) {
+      if(file.endsWith('ZeroTierSockets.h')&&oldText==='ZTS_API int ZTCALL zts_init_enable_controller(int enabled);'&&body.includes('ZTS_API int ZTCALL zts_controller_create_network(')&&body.includes('ZTS_API int ZTCALL zts_controller_authorize_member('))continue;
       if(body.includes(newText)) continue;
       if(!body.includes(oldText)) throw new Error(`SDK layout changed in ${file}: ${oldText.slice(0,70)}`);
       body=body.replace(oldText,newText);changed=true;
@@ -194,6 +198,7 @@ int zts_node_stop()`,
       if (normalized !== body) { body = normalized; changed = true; }
     }
     for (const [oldText, newText] of replacements) {
+      if(file.endsWith('ZeroTierSockets.h')&&oldText==='ZTS_API int ZTCALL zts_init_enable_controller(int enabled);'&&body.includes('ZTS_API int ZTCALL zts_controller_create_network(')&&body.includes('ZTS_API int ZTCALL zts_controller_authorize_member('))continue;
       if (file === 'src/Controls.cpp' && oldText === 'int zts_init_set_roots(const void* roots_data, unsigned int len)' &&
           body.includes('int zts_init_enable_controller(')) continue;
       if (file === 'src/NodeService.cpp' && oldText === 'int NodeService::enableEmbeddedController(bool enabled)' && newText === oldText) {
@@ -365,14 +370,15 @@ int zts_node_stop()`,
     else if cfg!(target_os = "linux") { println!("cargo:rustc-link-lib=dylib=stdc++"); }
     else if cfg!(target_os = "windows") { println!("cargo:rustc-link-lib=Iphlpapi"); }`],
   ]);
-  // Cargo build scripts execute on the host, so Android must dispatch by TARGET.
-  let androidBuild = readFileSync(buildFile, 'utf8');
-  if (!androidBuild.includes('fn build_android()')) {
-    androidBuild = androidBuild.replace('fn main() {', 'fn main() {\n    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") { build_android(); return; }');
-  } else {
-    androidBuild = androidBuild.slice(0, androidBuild.indexOf('\nfn build_android()'));
+  // Cargo build scripts execute on the host. Mobile SDK dispatch uses Cargo's target.
+  let mobileBuild = readFileSync(buildFile, 'utf8');
+  const helperStart = mobileBuild.search(/\nfn build_(?:android|ios)\(/);
+  if (helperStart >= 0) mobileBuild = mobileBuild.slice(0, helperStart);
+  for (const target of ['android', 'ios']) {
+    const dispatch = 'if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("' + target + '") { build_' + target + '(); return; }';
+    if (!mobileBuild.includes(dispatch)) mobileBuild = mobileBuild.replace('fn main() {', 'fn main() {\n    ' + dispatch);
   }
-  writeFileSync(buildFile, androidBuild + '\n' + readFileSync(new URL('./libzt-android-build.rs', import.meta.url), 'utf8'));
+  writeFileSync(buildFile, mobileBuild + '\n' + readFileSync(new URL('./libzt-android-build.rs', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('./libzt-ios-build.rs', import.meta.url), 'utf8'));
   // zts_util_delay may already have been fixed manually on Windows.
   // Do not overwrite an existing conversion or falsely report an SDK layout change.
   const nodeFile = join(crate, 'src', 'node.rs');
@@ -745,5 +751,6 @@ int zts_controller_deauthorize_member(uint64_t network_id, uint64_t member_id)
   for (const header of ['include/ZeroTierSockets.h', 'pkg/crate/libzt/src/include/ZeroTierSockets.h']) {
     modifyNative(header, [['ZTS_API int ZTCALL zts_controller_list_members(uint64_t network_id, char* out, unsigned int* out_len);', 'ZTS_API int ZTCALL zts_controller_list_members(uint64_t network_id, char* out, unsigned int* out_len);\nZTS_API int ZTCALL zts_controller_deauthorize_member(uint64_t network_id, uint64_t member_id);']]);
   }
+  patchLibztPacketAdapter(vend);
   console.log('libzt compatibility patches checked');
 }

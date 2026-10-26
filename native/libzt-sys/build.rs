@@ -9,7 +9,9 @@ fn main() {
     let dir = env::var_os("LINKSDK_LIBZT_LIB_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            if target_os == "android" {
+            if target_os == "ios" {
+                root.join("vendor/libzt/dist/ios").join(&target)
+            } else if target_os == "android" {
                 root.join("vendor/libzt/dist/android").join(&target)
             } else {
                 root.join("vendor/libzt/dist/native/lib")
@@ -31,7 +33,15 @@ fn main() {
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .size_t_is_usize(target_os != "windows");
     match target_os.as_str() {
-        "macos" | "ios" => println!("cargo:rustc-link-lib=dylib=c++"),
+        "macos" => println!("cargo:rustc-link-lib=dylib=c++"),
+        "ios" => {
+            println!("cargo:rustc-link-lib=dylib=c++");
+            let sdk = if target.contains("-sim") || target.starts_with("x86_64") { "iphonesimulator" } else { "iphoneos" };
+            let output = std::process::Command::new("xcrun").args(["--sdk",sdk,"--show-sdk-path"]).output().expect("iOS SDK query");
+            assert!(output.status.success(), "Full Xcode iOS SDK required");
+            let sysroot = String::from_utf8(output.stdout).unwrap();
+            builder = builder.clang_arg(format!("--target={target}")).clang_arg(format!("-isysroot{}",sysroot.trim()));
+        },
         "linux" => println!("cargo:rustc-link-lib=dylib=stdc++"),
         "windows" => println!("cargo:rustc-link-lib=Iphlpapi"),
         "android" => {

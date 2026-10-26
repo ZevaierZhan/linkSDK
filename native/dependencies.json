@@ -14,11 +14,16 @@
     "headerSha256": "9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6"
   },
   "patchInputs": {
-    "scripts/patch-libzt.mjs": "bfc31e555d6804fb0b337a546e4572f9cb241d639438843c2aaea61c84806646",
+    "scripts/patch-libzt.mjs": "5f1d454d9dfc931ae8e847386f42047761aaff82aa18803b755437ed8a78086f",
     "scripts/diagnostics/actual-socket-stun.hpp": "4114d193dba0333247c5d3b5f6803945be86f49c763865686eeb7bc61582346c",
     "scripts/libzt-android-build.rs": "5e4dd0f3f0421e27cd7110fb4939b2955c076832a6a7ecfc313bbdaf266dfd43",
-    "scripts/libzt-build-config.mjs": "262b3e5336cfe2130770fe83c15eb638255bbdd37cbdd4482157e8f283feef04",
-    "scripts/prepare-libzt.mjs": "eab9f4f18b96b5d0fec420305eee134252c43609f23cad5ef0d2a43f00806d60"
+    "scripts/libzt-build-config.mjs": "346152c9d00b2afc9791746c494b1fd4318b08f65332cbc9ce3526c510593fcd",
+    "scripts/prepare-libzt.mjs": "5c39e09ef7ad84506310d0d87848383e448788246b0a6a313b2310e079c4ec37",
+    "scripts/patch-libzt-packet-adapter.mjs": "9054e4bee6409ee164221e41694d546ac8dc0ae0886fc6186c69e5dae48d72cb",
+    "scripts/libzt-packet-adapter/api.h": "5ae426800163a7ad9b661fdaaf03e3ec11b38d8902aa95cb61fc7f67c0ce23ef",
+    "scripts/libzt-packet-adapter/LinkPacketAdapter.hpp": "d1f8a171520a808e8817c8cae260ab1960f9ec1c864182ea4725d965ac5442a8",
+    "scripts/libzt-packet-adapter/LinkPacketAdapter.cpp": "6fea221c66f7c638e57f4a9dc8895364746abcfa19473cc22eedc3cd46db74b9",
+    "scripts/libzt-ios-build.rs": "4fd346b1259451ec8239fa0ec2f353f970cc070078b65123c89300cc7dbcec01"
   },
   "extractedFrom": {
     "repository": "https://github.com/ZevaierZhan/link-personal-assets",

@@ -7,6 +7,10 @@ import {execFileSync} from 'node:child_process';
 export const nativeBuildInputs = [
   'scripts/prepare-libzt.mjs',
   'scripts/patch-libzt.mjs',
+  'scripts/patch-libzt-packet-adapter.mjs',
+  'scripts/libzt-packet-adapter/api.h',
+  'scripts/libzt-packet-adapter/LinkPacketAdapter.hpp',
+  'scripts/libzt-packet-adapter/LinkPacketAdapter.cpp',
   'scripts/diagnostics/actual-socket-stun.hpp',
   'scripts/libzt-build-config.mjs',
 ];
