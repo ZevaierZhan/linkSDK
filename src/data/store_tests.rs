@@ -456,3 +456,44 @@ fn invalid_envelope_and_malformed_updates_do_not_change_replica() {
     assert_eq!(m.change_received, 0);
     assert_eq!(heads(&mut s), before);
 }
+
+#[test]
+fn conditional_writes_reject_stale_and_invalid_versions_after_replication() {
+    let mut a = store("a");
+    let mut b = store("b");
+    let request = |op: &str, expected: Value, value: Value| json!({"op":op,"app":"test.v1","dataset":"notes","key":"main","expectedVersions":expected,"value":value});
+    local_action(&mut a, N, request("put", json!([]), json!(1))).unwrap();
+    let versions = entries(&mut a)["main"]["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["version"].clone())
+        .collect::<Vec<_>>();
+    repair(&mut a, &mut b);
+    put(&mut b, "main", json!(2));
+    repair(&mut a, &mut b);
+    let before = heads(&mut a);
+    for op in ["put", "delete"] {
+        for expected in [
+            json!(versions),
+            json!([]),
+            json!([versions[0], versions[0]]),
+            json!([7]),
+            json!("invalid"),
+        ] {
+            assert!(local_action(&mut a, N, request(op, expected, json!(3))).is_err());
+            assert_eq!(heads(&mut a), before);
+            assert_eq!(entries(&mut a)["main"]["value"], 2);
+        }
+    }
+    let versions = entries(&mut a)["main"]["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["version"].clone())
+        .collect::<Vec<_>>();
+    local_action(&mut a, N, request("delete", json!(versions), Value::Null)).unwrap();
+    assert!(entries(&mut a)["main"]["value"].is_null());
+    put(&mut a, "main", json!(4)); // Existing unconditional callers retain resolution semantics.
+    assert_eq!(entries(&mut a)["main"]["value"], 4);
+}

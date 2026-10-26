@@ -1,3 +1,4 @@
+import {libztBuildPlan, windowsNinjaEnv, windowsMsvcEnv} from './libzt-build-config.mjs';
 import{createHash}from'node:crypto';
 import {patchLibzt} from "./patch-libzt.mjs";
 import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
@@ -11,15 +12,17 @@ const vend = join(root, 'vendor', 'libzt');
 const manifest = join(vend, 'pkg', 'crate', 'libzt', 'Cargo.toml');
 const nativeDir = join(vend, 'dist', 'native', 'lib');
 const nativeFile = join(nativeDir, process.platform === 'win32' ? 'zt.lib' : 'libzt.a');
-const cmakeBuild = join(vend, 'cache', `linksdk-${process.platform}-${process.arch}-release`);
+const plan = libztBuildPlan(root);
+let nativeEnv = process.env;
+const cmakeBuild = join(vend, 'cache', plan.directory);
 const nativeBuildStamp = join(nativeDir, 'build-revision');
-const nativeBuildRevision = 'linksdk-native-v1-' + process.platform + '-' + process.arch + '-' + sdkRevision + '-' + createHash('sha256').update(readFileSync(join(root,'scripts','patch-libzt.mjs'))).update(readFileSync(join(root,'scripts','diagnostics','actual-socket-stun.hpp'))).digest('hex');
+const nativeBuildRevision = 'linksdk-native-v1-' + process.platform + '-' + process.arch + '-' + sdkRevision + '-' + plan.fingerprint;
 const jsonDir = join(root, 'vendor', 'nlohmann-json');
 const jsonHeader = join(jsonDir, 'single_include', 'nlohmann', 'json.hpp');
 
 function run(cmd, args, cwd = root) {
   console.log(`> ${cmd} ${args.join(' ')}`);
-  execFileSync(cmd, args, { cwd, stdio: 'inherit', env: process.env });
+  execFileSync(cmd, args, { cwd, stdio: 'inherit', env: nativeEnv });
 }
 function findLibrary(dir, depth = 0) {
   if (!existsSync(dir) || depth > 7) return null;
@@ -80,6 +83,13 @@ try {
       '-DBUILD_HOST=OFF',
       '-DZTS_DISABLE_CENTRAL_API=ON',
     ];
+    if (plan.generator) {
+      nativeEnv = windowsNinjaEnv(windowsMsvcEnv());
+      // Fail clearly rather than silently returning to a serial generator.
+      try {execFileSync('ninja', ['--version'], {env: nativeEnv, stdio: 'pipe'});}
+      catch {throw new Error('Windows libzt builds require Ninja on PATH or the Visual Studio CMake tools; serial NMake fallback is disabled.');}
+      flags.push('-G', plan.generator);
+    }
     // The embedded official Controller also depends on nlohmann/json.hpp.
     const includeDir = join(jsonDir, 'single_include').replaceAll('\\', '/');
     if (process.platform === 'win32') {

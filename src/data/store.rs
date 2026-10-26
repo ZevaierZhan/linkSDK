@@ -374,6 +374,32 @@ pub(super) fn local_action(s: &mut Store, n: u64, request: Value) -> Result<Valu
         "put" | "delete" => {
             let key = request["key"].as_str().ok_or("缺少key")?;
             valid(key)?;
+            // Optional optimistic concurrency is checked inside this same
+            // IMMEDIATE transaction, including changes received by sync since
+            // the caller read its form. Existing unconditional callers keep
+            // their established Automerge conflict-resolution semantics.
+            if let Some(expected) = request.get("expectedVersions") {
+                let mut expected = expected
+                    .as_array()
+                    .ok_or("expectedVersions必须是版本编号列表")?
+                    .iter()
+                    .map(|v| v.as_str().map(str::to_owned).ok_or("版本编号必须是字符串"))
+                    .collect::<Result<Vec<_>, _>>()?;
+                expected.sort();
+                if expected.windows(2).any(|v| v[0] == v[1]) {
+                    return Err("expectedVersions不能包含重复编号".into());
+                }
+                let mut actual = doc
+                    .get_all(ROOT, key)
+                    .map_err(err)?
+                    .into_iter()
+                    .map(|(_, id)| id.to_string())
+                    .collect::<Vec<_>>();
+                actual.sort();
+                if actual != expected {
+                    return Err("共享配置已有更新，请重新载入后再保存；未覆盖新版本。".into());
+                }
+            }
             if op == "delete" {
                 doc.delete(ROOT, key).map_err(err)?;
             } else {
