@@ -241,7 +241,34 @@ pub fn exchange_channel_with(
     guard: &impl ReplicationGuard,
 ) -> Result<(), String> {
     guard.current()?;
-    let (mut store, n) = guard.commit(|| Store::open(home))?;
+    let (store, n) = guard.commit(|| Store::open(home))?;
+    exchange_store(store, n, id, socket, incoming_ip, target, authorize, guard)
+}
+/// Replicate a host-selected directory without fabricating identity/configuration files.
+pub fn exchange_in(
+    directory: &std::path::Path,
+    network_id: u64,
+    id: &str,
+    socket: &impl FrameChannel,
+    incoming_ip: Option<&str>,
+    target: Option<&str>,
+    authorize: impl Fn(&str) -> Result<String, String>,
+    guard: &impl ReplicationGuard,
+) -> Result<(), String> {
+    guard.current()?;
+    let (store, n) = guard.commit(|| Store::open_at(directory, network_id))?;
+    exchange_store(store, n, id, socket, incoming_ip, target, authorize, guard)
+}
+fn exchange_store(
+    mut store: Store,
+    n: u64,
+    id: &str,
+    socket: &impl FrameChannel,
+    incoming_ip: Option<&str>,
+    target: Option<&str>,
+    authorize: impl Fn(&str) -> Result<String, String>,
+    guard: &impl ReplicationGuard,
+) -> Result<(), String> {
     let mut states = States::new();
     let mut metrics = Metrics {
         peer: target.unwrap_or_default().into(),
@@ -397,5 +424,107 @@ mod generation_tests {
         }
         drop(store);
         std::fs::remove_dir_all(home).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod explicit_channel_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    struct Tcp(Mutex<std::net::TcpStream>);
+    impl FrameChannel for Tcp {
+        fn send_frame(&self, frame: Frame) -> Result<(), String> {
+            self.0.lock().write_all(&frame.encode()?).map_err(err)
+        }
+        fn receive_frame(&self, _: Instant) -> Result<Frame, String> {
+            {
+                let mut socket = self.0.lock();
+                let mut header = [0u8; 5];
+                socket.read_exact(&mut header).map_err(err)?;
+                let size = u32::from_be_bytes(header[1..5].try_into().unwrap()) as usize;
+                if size > crate::network::frame::MAX_FRAME {
+                    return Err("oversized frame".into());
+                }
+                let mut data = vec![0; size];
+                socket.read_exact(&mut data).map_err(err)?;
+                Ok(Frame {
+                    kind: header[0],
+                    data,
+                })
+            }
+        }
+    }
+    #[test]
+    fn public_directories_exchange_over_os_tcp_without_identity_files() {
+        let root = std::env::temp_dir().join(format!(
+            "sdk-os-channel-{}-{}",
+            std::process::id(),
+            crate::now_millis()
+        ));
+        let a = root.join("a");
+        let b = root.join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        crate::data::action_in(&a,42,serde_json::json!({"op":"put","app":"public","dataset":"history","key":"message","value":"retained"})).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let receiver = b.clone();
+        let server = std::thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            exchange_in(
+                &receiver,
+                42,
+                "bbbbbbbbbb",
+                &Tcp(Mutex::new(socket)),
+                Some("127.0.0.1"),
+                None,
+                |p| {
+                    if p == "aaaaaaaaaa" {
+                        Ok("127.0.0.1".into())
+                    } else {
+                        Err("untrusted".into())
+                    }
+                },
+                &Unscoped,
+            )
+            .unwrap();
+        });
+        let socket = std::net::TcpStream::connect(address).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        exchange_in(
+            &a,
+            42,
+            "aaaaaaaaaa",
+            &Tcp(Mutex::new(socket)),
+            None,
+            Some("bbbbbbbbbb"),
+            |p| {
+                if p == "bbbbbbbbbb" {
+                    Ok("127.0.0.1".into())
+                } else {
+                    Err("untrusted".into())
+                }
+            },
+            &Unscoped,
+        )
+        .unwrap();
+        server.join().unwrap();
+        let value = crate::data::action_in(
+            &b,
+            42,
+            serde_json::json!({"op":"get","app":"public","dataset":"history","key":"message"}),
+        )
+        .unwrap();
+        assert_eq!(value["message"]["value"], "retained");
+        for dir in [&a, &b] {
+            assert!(!dir.join("identity.secret").exists());
+            assert!(!dir.join("space.json").exists());
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

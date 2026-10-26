@@ -497,3 +497,28 @@ fn conditional_writes_reject_stale_and_invalid_versions_after_replication() {
     put(&mut a, "main", json!(4)); // Existing unconditional callers retain resolution semantics.
     assert_eq!(entries(&mut a)["main"]["value"], 4);
 }
+
+#[test]
+fn explicit_directory_preserves_network_ownership_without_identity_files() {
+    let dir = std::env::temp_dir().join(format!(
+        "sdk-public-directory-{}-{}",
+        std::process::id(),
+        crate::now_millis()
+    ));
+    std::fs::create_dir(&dir).unwrap();
+    let put =
+        json!({"op":"put","app":"public","dataset":"history","key":"value","value":"retained"});
+    crate::data::action_in(&dir, 42, put).unwrap();
+    let get = json!({"op":"get","app":"public","dataset":"history","key":"value"});
+    assert!(crate::data::action_in(&dir, 43, get.clone())
+        .unwrap_err()
+        .contains("所属空间不匹配"));
+    assert_eq!(
+        crate::data::action_in(&dir, 42, get).unwrap()["value"]["value"],
+        "retained"
+    );
+    assert!(!dir.join("identity.secret").exists());
+    assert!(!dir.join("space.json").exists());
+    assert!(crate::data::action_in(&dir, 0, json!({"op":"status"})).is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}

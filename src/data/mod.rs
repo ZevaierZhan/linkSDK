@@ -57,3 +57,14 @@ impl Dataset {
 pub fn action_at(home: impl AsRef<std::path::Path>, request: Value) -> Result<Value, String> {
     store::action(home.as_ref().to_path_buf(), request)
 }
+
+/// Storage-only adapter for a host-owned verified public space context.
+/// The caller owns directory selection/permissions; no identity or network is created.
+pub fn action_in(
+    directory: impl AsRef<std::path::Path>,
+    network_id: u64,
+    request: Value,
+) -> Result<Value, String> {
+    let (mut store, n) = store::Store::open_at(directory.as_ref(), network_id)?;
+    store::local_action(&mut store, n, request)
+}

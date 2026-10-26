@@ -114,6 +114,12 @@ impl Store {
         let config: SpaceConfig =
             serde_json::from_slice(&std::fs::read(dir.join("space.json")).map_err(err)?)
                 .map_err(err)?;
+        Self::open_at(&dir, config.network_id)
+    }
+    pub(super) fn open_at(dir: &Path, network_id: u64) -> Result<(Self, u64), String> {
+        if network_id == 0 {
+            return Err("Invalid network context".into());
+        }
         // Never invent a new replica when identity/configuration is unavailable.
         let mut db = Connection::open(dir.join("shared-data.sqlite")).map_err(err)?;
         db.busy_timeout(Duration::from_secs(5)).map_err(err)?;
@@ -131,7 +137,7 @@ impl Store {
             .map_err(err)?;
         db.execute(
             "INSERT OR IGNORE INTO shared_meta VALUES('network',?1)",
-            [format!("{:016x}", config.network_id)],
+            [format!("{:016x}", network_id)],
         )
         .map_err(err)?;
         let saved: String = db
@@ -141,7 +147,7 @@ impl Store {
                 |r| r.get(0),
             )
             .map_err(err)?;
-        if saved != format!("{:016x}", config.network_id) {
+        if saved != format!("{:016x}", network_id) {
             return Err("共享副本所属空间不匹配".into());
         }
         Ok((
@@ -149,7 +155,7 @@ impl Store {
                 db,
                 actor: ActorId::from(actor.as_bytes()),
             },
-            config.network_id,
+            network_id,
         ))
     }
     fn load(db: &Connection, n: u64, a: &str, d: &str) -> Result<AutoCommit, String> {
