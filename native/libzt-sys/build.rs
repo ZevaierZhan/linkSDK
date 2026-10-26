@@ -36,12 +36,21 @@ fn main() {
         "macos" => println!("cargo:rustc-link-lib=dylib=c++"),
         "ios" => {
             println!("cargo:rustc-link-lib=dylib=c++");
-            let sdk = if target.contains("-sim") || target.starts_with("x86_64") { "iphonesimulator" } else { "iphoneos" };
-            let output = std::process::Command::new("xcrun").args(["--sdk",sdk,"--show-sdk-path"]).output().expect("iOS SDK query");
+            let sdk = if target.contains("-sim") || target.starts_with("x86_64") {
+                "iphonesimulator"
+            } else {
+                "iphoneos"
+            };
+            let output = std::process::Command::new("xcrun")
+                .args(["--sdk", sdk, "--show-sdk-path"])
+                .output()
+                .expect("iOS SDK query");
             assert!(output.status.success(), "Full Xcode iOS SDK required");
             let sysroot = String::from_utf8(output.stdout).unwrap();
-            builder = builder.clang_arg(format!("--target={target}")).clang_arg(format!("-isysroot{}",sysroot.trim()));
-        },
+            builder = builder
+                .clang_arg(format!("--target={target}"))
+                .clang_arg(format!("-isysroot{}", sysroot.trim()));
+        }
         "linux" => println!("cargo:rustc-link-lib=dylib=stdc++"),
         "windows" => println!("cargo:rustc-link-lib=Iphlpapi"),
         "android" => {

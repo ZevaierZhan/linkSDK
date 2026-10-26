@@ -14,7 +14,7 @@ fn store(name: &str) -> Store {
         actor: ActorId::from(name.as_bytes()),
     }
 }
-fn call(s: &mut Store, op: &str, app: &str, key: &str, value: Value) -> Result<Value, String> {
+fn call(s: &mut Store, op: &str, app: &str, key: &str, value: Value) -> Result<Value, DataError> {
     local_action(
         s,
         N,
@@ -153,7 +153,7 @@ fn rejected_merge_keeps_document_safe_state_and_metrics_then_retries() {
         match b.sync_step(N, "a", &mut sb, p, &mut m) {
             Ok(reply) => p = step(&mut a, "b", &mut sa, reply),
             Err(e) => {
-                assert!(e.contains("容量"), "{e}");
+                assert!(e.to_string().contains("容量"), "{e}");
                 assert_eq!(heads(&mut b), doc_before);
                 assert_eq!(
                     sb.iter()
@@ -194,6 +194,7 @@ fn dataset_quota_rejects_whole_exchange_and_recovers_after_expansion() {
         .sync_step(N, "a", &mut sb, p, &mut Metrics::default())
         .err()
         .unwrap()
+        .to_string()
         .contains("容量"));
     assert!(sb.is_empty());
     assert!(b.replicas(N).unwrap().is_empty());
@@ -288,7 +289,7 @@ fn sqlite_full_and_readonly_do_not_acknowledge_writes() {
         json!(B64.encode(bytes)),
     )
     .unwrap_err();
-    assert!(e.contains("full"), "{e}");
+    assert_eq!(e.kind, DataErrorKind::DiskFull);
     assert_eq!(heads(&mut s), before);
     s.db.pragma_update(None, "max_page_count", 10000).unwrap();
     put(&mut s, "recovered", json!(true));
@@ -368,7 +369,10 @@ fn storage_schema_upgrade_preserves_history_and_future_schema_is_untouched() {
     Store::initialize(&mut s.db).unwrap();
     assert_eq!(heads(&mut s), before);
     s.db.pragma_update(None, "user_version", 99).unwrap();
-    assert!(Store::initialize(&mut s.db).unwrap_err().contains("升级"));
+    assert!(Store::initialize(&mut s.db)
+        .unwrap_err()
+        .to_string()
+        .contains("升级"));
     assert_eq!(
         s.db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
@@ -512,6 +516,7 @@ fn explicit_directory_preserves_network_ownership_without_identity_files() {
     let get = json!({"op":"get","app":"public","dataset":"history","key":"value"});
     assert!(crate::data::action_in(&dir, 43, get.clone())
         .unwrap_err()
+        .to_string()
         .contains("所属空间不匹配"));
     assert_eq!(
         crate::data::action_in(&dir, 42, get).unwrap()["value"]["value"],
@@ -520,5 +525,42 @@ fn explicit_directory_preserves_network_ownership_without_identity_files() {
     assert!(!dir.join("identity.secret").exists());
     assert!(!dir.join("space.json").exists());
     assert!(crate::data::action_in(&dir, 0, json!({"op":"status"})).is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_busy_sync_round_keeps_safe_state_and_recovers_after_unlock() {
+    let dir = std::env::temp_dir().join(format!(
+        "linksdk-sync-busy-{}-{}",
+        std::process::id(),
+        crate::now_millis()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (mut target, n) = Store::open_at(&dir, N).unwrap();
+    let mut source = store("source");
+    put(&mut source, "key", json!(7));
+    let mut source_state = States::new();
+    let packet = step(&mut source, "target", &mut source_state, vec![]);
+    let locker = Connection::open(dir.join("shared-data.sqlite")).unwrap();
+    locker.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let mut states = States::new();
+    let mut metrics = Metrics::default();
+    let before = heads(&mut target);
+    let error = target
+        .sync_step(n, "source", &mut states, copy_packet(&packet), &mut metrics)
+        .err()
+        .unwrap();
+    assert_eq!(error.kind, DataErrorKind::Busy);
+    assert!(states.is_empty());
+    assert_eq!(metrics.change_received, 0);
+    assert_eq!(heads(&mut target), before);
+    locker.execute_batch("ROLLBACK").unwrap();
+    target
+        .sync_step(n, "source", &mut states, packet, &mut metrics)
+        .unwrap();
+    repair(&mut source, &mut target);
+    assert_eq!(entries(&mut target)["key"]["value"], 7);
+    drop(locker);
+    drop(target);
     std::fs::remove_dir_all(dir).unwrap();
 }

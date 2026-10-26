@@ -1,10 +1,18 @@
 //! Atomic JSON values: local durable writes, eventual replication, inspectable conflicts.
+mod error;
+mod operation;
 #[cfg(feature = "network")]
 pub mod replication;
 #[cfg_attr(not(feature = "network"), allow(dead_code))]
 mod store;
+mod view;
+pub use error::{DataError, DataErrorKind, DataResult};
+pub use operation::Operation;
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc};
+pub use view::{
+    DataStore, DatasetKey, DatasetSnapshot, Snapshot, SnapshotEvent, SnapshotReader, Subscription,
+};
 
 #[derive(Clone)]
 pub struct Dataset {
@@ -30,7 +38,7 @@ impl Dataset {
         if let Some(value) = value {
             request["value"] = value;
         }
-        store::action(self.home.clone(), request)
+        action_at(&self.home, request)
     }
     pub fn put(&self, key: &str, value: Value) -> Result<Value, String> {
         self.call("put", Some(key), Some(value))
@@ -55,7 +63,7 @@ impl Dataset {
 /// Adapter for a host that already owns profile lifecycle and permits serialized CLI writers.
 /// Keeps the original space/shared-data.sqlite layout; does not take a second profile lock.
 pub fn action_at(home: impl AsRef<std::path::Path>, request: Value) -> Result<Value, String> {
-    store::action(home.as_ref().to_path_buf(), request)
+    try_action_at(home, request, &Operation::default()).map_err(Into::into)
 }
 
 /// Storage-only adapter for a host-owned verified public space context.
@@ -65,6 +73,22 @@ pub fn action_in(
     network_id: u64,
     request: Value,
 ) -> Result<Value, String> {
-    let (mut store, n) = store::Store::open_at(directory.as_ref(), network_id)?;
-    store::local_action(&mut store, n, request)
+    try_action_in(directory, network_id, request, &Operation::default()).map_err(Into::into)
+}
+
+/// Typed adapters retain transient storage errors for host policy. Legacy adapters format at the edge.
+pub fn try_action_at(
+    home: impl AsRef<std::path::Path>,
+    request: Value,
+    op: &Operation,
+) -> DataResult<Value> {
+    DataStore::open_at(home, op)?.action(request, op)
+}
+pub fn try_action_in(
+    directory: impl AsRef<std::path::Path>,
+    network_id: u64,
+    request: Value,
+    op: &Operation,
+) -> DataResult<Value> {
+    DataStore::open_in(directory, network_id, op)?.action(request, op)
 }

@@ -241,7 +241,7 @@ pub fn exchange_channel_with(
     guard: &impl ReplicationGuard,
 ) -> Result<(), String> {
     guard.current()?;
-    let (store, n) = guard.commit(|| Store::open(home))?;
+    let (store, n) = guard.commit(|| Store::open(home).map_err(Into::into))?;
     exchange_store(store, n, id, socket, incoming_ip, target, authorize, guard)
 }
 /// Replicate a host-selected directory without fabricating identity/configuration files.
@@ -256,7 +256,7 @@ pub fn exchange_in(
     guard: &impl ReplicationGuard,
 ) -> Result<(), String> {
     guard.current()?;
-    let (store, n) = guard.commit(|| Store::open_at(directory, network_id))?;
+    let (store, n) = guard.commit(|| Store::open_at(directory, network_id).map_err(Into::into))?;
     exchange_store(store, n, id, socket, incoming_ip, target, authorize, guard)
 }
 fn exchange_store(
@@ -280,7 +280,9 @@ fn exchange_store(
         if incoming_ip.is_none() {
             authorize(&metrics.peer)?;
             let replicas = guard.commit(|| {
-                store.sync_step(n, &metrics.peer.clone(), &mut states, vec![], &mut metrics)
+                store
+                    .sync_step(n, &metrics.peer.clone(), &mut states, vec![], &mut metrics)
+                    .map_err(Into::into)
             })?;
             let packet = Packet {
                 version: PROTOCOL_VERSION,
@@ -308,13 +310,15 @@ fn exchange_store(
                 return Ok(());
             }
             let replicas = guard.commit(|| {
-                store.sync_step(
-                    n,
-                    &metrics.peer.clone(),
-                    &mut states,
-                    remote.replicas,
-                    &mut metrics,
-                )
+                store
+                    .sync_step(
+                        n,
+                        &metrics.peer.clone(),
+                        &mut states,
+                        remote.replicas,
+                        &mut metrics,
+                    )
+                    .map_err(Into::into)
             })?;
             let packet = Packet {
                 version: PROTOCOL_VERSION,
