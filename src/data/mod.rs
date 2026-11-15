@@ -92,3 +92,6 @@ pub fn try_action_in(
 ) -> DataResult<Value> {
     DataStore::open_in(directory, network_id, op)?.action(request, op)
 }
+
+#[cfg(all(test, windows))]
+mod wal_windows_tests;
