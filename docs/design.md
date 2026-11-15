@@ -2,7 +2,7 @@
 
 ## Windows canonical local-drive WAL regression, 2026-11-15 (in progress)
 
-The Link consumer reproduces an independent read-only SQLite Protocol 15 after about 10.8 seconds while its single installed Windows process is alive. A diagnostic-only exact-test child exercises the same SQLite 3.53.2 SHM lock race previously isolated in the consumer Storage extraction: two real shared acquisitions, actual releases, an exclusive recovery-lock check and a synthetic WAL-index rebuild. Only new temporary fixture databases are touched; no Node or household profile is started. The child has a 20-second collector limit and is always killed/reaped on failure. Production code is unchanged at this stage; Windows red/green and the data-only baseline remain pending.
+The Link consumer reproduces an independent read-only SQLite Protocol 15 after about 10.8 seconds while its single installed Windows process is alive. A diagnostic-only exact-test child exercises the same SQLite 3.53.2 SHM lock race previously isolated in the consumer Storage extraction: two real shared acquisitions, actual releases, an exclusive recovery-lock check and a synthetic WAL-index rebuild. Only new temporary fixture databases are touched; no Node or household profile is started. The child has a 20-second collector limit and is always killed/reaped on failure. Local Windows runner 43727106312, source 3739d8a, actually reproduced recovery lock_rc=5 and SQLite code15 after10885ms; the exact child and parent fail. No installed profile was touched. The mitigation now applies equivalent ordinary disk spelling at all three Store connection opens, including initialized/read/replication paths. DataStore canonical gate keys, actor/network metadata, storage v1, wire v2, FULL commits and Operation retry policy remain unchanged. The public sqlite_file_path helper permits an application-owned SQLite database to use the same narrow spelling rule. UNC/device, long paths, reserved names and non-equivalent aliases are left unchanged; this does not repair the underlying SQLite UNC implementation. Mac data-only baseline passes16 unit,16 integration with1 ignored subprocess fixture, and3 public contracts. Windows green remains pending. GitHub data CI now includes Windows to prevent this Windows-only regression escaping Linux-only coverage.
 
 ## Windows v0.2.0 consumer build correction, 2026-10-26
 
@@ -12,7 +12,7 @@ B5533's Windows consumer build of tag v0.2.0 failed with E0384 in `network/socke
 
 One public Rust crate, `link-sdk` (`link_sdk` in code). `native/libzt-sys` is an internal raw-binding/build dependency. Minimum core: OS support, P2P networking and shared data. `runtime` composes them. Application-specific PTY, process execution, TUN, media and UI remain outside this repository.
 
-The GitHub repository is private: `ZevaierZhan/linkSDK`. Public distribution and a license for original SDK code have not been selected; retain third-party notices. No crates.io publication is configured.
+The GitHub repository is `ZevaierZhan/linkSDK`; its existing visibility was verified as public on2026-11-15. This task did not change repository visibility or the original-code licensing policy; retain third-party notices. No crates.io publication is configured.
 
 ## Modules and dependency rules
 
