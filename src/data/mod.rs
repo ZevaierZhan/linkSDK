@@ -3,12 +3,14 @@ mod error;
 mod operation;
 #[cfg(feature = "network")]
 pub mod replication;
+mod sqlite_path;
 #[cfg_attr(not(feature = "network"), allow(dead_code))]
 mod store;
 mod view;
 pub use error::{DataError, DataErrorKind, DataResult};
 pub use operation::Operation;
 use serde_json::{json, Value};
+pub use sqlite_path::sqlite_file_path;
 use std::{path::PathBuf, sync::Arc};
 pub use view::{
     DataStore, DatasetKey, DatasetSnapshot, Snapshot, SnapshotEvent, SnapshotReader, Subscription,
@@ -92,3 +94,6 @@ pub fn try_action_in(
 ) -> DataResult<Value> {
     DataStore::open_in(directory, network_id, op)?.action(request, op)
 }
+
+#[cfg(all(test, windows))]
+mod wal_windows_tests;

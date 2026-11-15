@@ -81,7 +81,7 @@ fn err(e: impl std::error::Error + Send + Sync + 'static) -> DataError {
 }
 impl Store {
     pub(super) fn initialized(dir: &Path) -> Result<bool, DataError> {
-        let path = dir.join("shared-data.sqlite");
+        let path = super::sqlite_file_path(dir, "shared-data.sqlite");
         if !path.try_exists().map_err(err)? {
             return Ok(false);
         }
@@ -159,7 +159,8 @@ impl Store {
             return Err("Invalid network context".into());
         }
         // Never invent a new replica when identity/configuration is unavailable.
-        let mut db = Connection::open(dir.join("shared-data.sqlite")).map_err(err)?;
+        let mut db =
+            Connection::open(super::sqlite_file_path(dir, "shared-data.sqlite")).map_err(err)?;
         db.busy_timeout(Duration::ZERO).map_err(err)?;
         // Connection-local, never rely on a build's default WAL durability setting.
         db.pragma_update(None, "synchronous", "FULL").map_err(err)?;
@@ -242,7 +243,9 @@ impl Store {
         } else {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
         };
-        let db = Connection::open_with_flags(dir.join("shared-data.sqlite"), flags).map_err(err)?;
+        let db =
+            Connection::open_with_flags(super::sqlite_file_path(dir, "shared-data.sqlite"), flags)
+                .map_err(err)?;
         db.busy_timeout(Duration::ZERO).map_err(err)?;
         if !readonly {
             db.pragma_update(None, "synchronous", "FULL").map_err(err)?;
